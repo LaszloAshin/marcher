@@ -25,13 +25,29 @@ public:
 	Vector &z(float z) { z_ = z; return *this; }
 	Vector &w(float w) { w_ = w; return *this; }
 
+	Vector h() const { return Vector(x_ / w_, y_ / w_, z_ / w_); }
+
 	Vector operator*(float s) const { return Vector(x_ * s, y_ * s, z_ * s, w_); }
 	Vector operator+(const Vector &v) const { return Vector(x_ / w_ + v.x_ / v.w_, y_ / w_ + v.y_ / v.w_, z_ / w_ + v.z_ / v.w_); }
 	Vector operator-(const Vector &v) const { return Vector(x_ / w_ - v.x_ / v.w_, y_ / w_ - v.y_ / v.w_, z_ / w_ - v.z_ / v.w_); }
 
 	float l() const { float x(x_ / w_), y(y_ / w_), z(z_ / w_); return sqrtf(x * x + y * y + z * z); }
 	Vector norm() const { float len(l()); return Vector(x_ / len, y_ / len, z_ / len); }
+
+	float dot(const Vector &v) const { return x_ * v.x_ + y_ * v.y_ + z_ * v.z_; }
+	Vector operator%(const Vector &v) const;
 };
+
+Vector
+Vector::operator%(const Vector &v)
+const
+{
+	return Vector(
+		y_ * v.z_ - z_ * v.y_,
+		z_ * v.x_ - x_ * v.z_,
+		x_ * v.y_ - y_ * v.x_
+	);
+}
 
 class Pixel {
 	float r_, g_, b_, a_;
@@ -170,25 +186,61 @@ public:
 	const Vector &d() const { return d_; }
 };
 
-class Scene {
-	static float f(float x, float z) { return sinf(x) * sinf(z); }
-	static float g(float x, float z) { return 1.0f; }
+class FuncFace {
+	static const float eps = 0.01f;
 
 public:
+	virtual ~FuncFace() {}
+
+	virtual float f(float x, float z) const = 0;
+	Vector dx(float x, float z) const { return Vector(2.0f * eps, f(x + eps, z) - f(x - eps, z), 0.0f); }
+	Vector dz(float x, float z) const { return Vector(0.0f, f(x, z + eps) - f(x, z - eps), 2.0f * eps); }
+	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }
+};
+
+class MyFuncFace : public FuncFace {
+public:
+	virtual float f(float x, float z) const { return sinf(x) * sinf(z); }
+};
+
+class Scene {
+	const FuncFace &gnd_;
+	Vector light_;
+	Vector cam_;
+
+public:
+	Scene(FuncFace &gnd)
+	: gnd_(gnd)
+	{}
+
+	Scene &light(const Vector &light) { light_ = light; return *this; }
+	Scene &cam(const Vector &cam) { cam_ = cam; return *this; }
+
+	const Vector &cam() const { return cam_; }
+
 	Pixel cast(const Ray &r);
 };
 
 Pixel
 Scene::cast(const Ray &r)
 {
-	float tinc = 0.1f;
+	float tinc = 0.05f;
 	float tmin = 1.0f;
 	float tmax = 20.0f;
 	for (float t = tmin; t < tmax; t += tinc) {
 		Vector p(r.o() + r.d() * t);
-		float v = f(p.x(), p.z());
-		if (p.y() < v) {
-			return Pixel(1.0f, 0.5f * (v + 1.0f)) * ((tmax - t) / tmax);
+		float h = gnd_.f(p.x(), p.z());
+		if (p.y() < h) {
+			Vector n(gnd_.n(p.x(), p.z()));
+			Vector l((light_ - p).norm());
+			Vector v((cam_ - p).norm());
+			Vector k(0.1f, l.dot(n));
+			if (k.y() > 0.0f) {
+				k.z(powf(((n * k.y() - l) * 2.0f + l).dot(v), 8.0f));
+			} else {
+				k.y(0.0f);
+			}
+			return Pixel(1.0f, 1.0f, 1.0f) * k.dot(Vector(0.1f, 0.6f, 0.3f));
 		}
 	}
 	return Pixel();
@@ -212,7 +264,7 @@ Tracer::render(Pixmap &pm, Scene &s)
 		d.y(1.0f - 2.0f * y / (pm.h() - 1));
 		for (int x = 0; x < pm.w(); ++x) {
 			d.x(2.0f * x / (pm.w() - 1) - 1.0f);
-			pm.at(x, y) = s.cast(Ray(Vector(0.0f, 2.0f), d));
+			pm.at(x, y) = s.cast(Ray(s.cam(), d));
 		}
 	}
 	return pm;
@@ -222,7 +274,10 @@ int
 main()
 {
 	Pixmap pm(320, 200);
-	Scene s;
+	MyFuncFace ff1;
+	Scene s(ff1);
+	s.light(Vector(-4.0f, 4.0f, -10.0f));
+	s.cam(Vector(0.0f, 4.0f, 0.0f));
 	Netbpm("x.ppm").save(Tracer(90.0f).render(pm, s));
 	return 0;
 }
