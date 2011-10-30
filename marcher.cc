@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <cmath>
+#include <cassert>
 
 class Vector {
 	float x_, y_, z_, w_;
@@ -198,10 +199,61 @@ public:
 	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }
 };
 
-class MyFuncFace : public FuncFace {
+template <class T>
+class Interpolator {
 public:
-	virtual float f(float x, float z) const { return sinf(x) * sinf(z); }
+	virtual ~Interpolator() {}
+
+	virtual T at(float x) const = 0;
 };
+
+template <class T>
+class CubicInterpolator : public Interpolator<T> {
+	const T p0_, p1_, p2_, p3_;
+
+public:
+	CubicInterpolator(const T &p0, const T &p1, const T &p2, const T &p3)
+	: p0_(p0)
+	, p1_(p1)
+	, p2_(p2)
+	, p3_(p3)
+	{}
+
+	virtual T
+	at(float x)
+	const
+	{
+		float fx = -0.5f * p0_ + 1.5f * p1_ - 1.5f * p2_ + 0.5f * p3_;
+		fx *= x;
+		fx += p0_ - 2.5 * p1_ + 2.0f * p2_ - 0.5f * p3_;
+		fx *= x;
+		fx += -0.5f * p0_ + 0.5f * p2_;
+		return x * fx + p1_;
+	}
+};
+
+class MyFuncFace : public FuncFace {
+	static float noise(int x) { return 1.0f - ((x * (x * x * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0; }
+	static float noise2d(int x, int z) { return noise(z * 1024 + x); }
+
+public:
+//	virtual float f(float x, float z) const { return sinf(x) * sinf(z); }
+	virtual float f(float x, float z) const;
+};
+
+float
+MyFuncFace::f(float x, float z)
+const
+{
+	int ix = int(floor(x));
+	int iz = int(floor(z));
+	x -= ix, z -= iz;
+	float a = CubicInterpolator<float>(noise2d(ix - 1, iz - 1), noise2d(ix, iz - 1), noise2d(ix + 1, iz - 1), noise2d(ix + 2, iz - 1)).at(x);
+	float b = CubicInterpolator<float>(noise2d(ix - 1, iz), noise2d(ix, iz), noise2d(ix + 1, iz), noise2d(ix + 2, iz)).at(x);
+	float c = CubicInterpolator<float>(noise2d(ix - 1, iz + 1), noise2d(ix, iz + 1), noise2d(ix + 1, iz + 1), noise2d(ix + 2, iz + 1)).at(x);
+	float d = CubicInterpolator<float>(noise2d(ix - 1, iz + 2), noise2d(ix, iz + 2), noise2d(ix + 1, iz + 2), noise2d(ix + 2, iz + 2)).at(x);
+	return CubicInterpolator<float>(a, b, c, d).at(z);
+}
 
 class Scene {
 	const FuncFace &gnd_;
@@ -224,13 +276,18 @@ public:
 Pixel
 Scene::cast(const Ray &r)
 {
-	float tinc = 0.05f;
+	float tinc = 0.01f;
 	float tmin = 1.0f;
-	float tmax = 20.0f;
+	float tmax = 50.0f;
 	for (float t = tmin; t < tmax; t += tinc) {
 		Vector p(r.o() + r.d() * t);
 		float h = gnd_.f(p.x(), p.z());
 		if (p.y() < h) {
+			if (tinc > 0.1f) {
+				t -= tinc;
+				tinc = 0.01f;
+				continue;
+			}
 			Vector n(gnd_.n(p.x(), p.z()));
 			Vector l((light_ - p).norm());
 			Vector v((cam_ - p).norm());
@@ -242,6 +299,7 @@ Scene::cast(const Ray &r)
 			}
 			return Pixel(1.0f, 1.0f, 1.0f) * k.dot(Vector(0.1f, 0.6f, 0.3f));
 		}
+		tinc *= 1.1f;
 	}
 	return Pixel();
 }
@@ -273,7 +331,7 @@ Tracer::render(Pixmap &pm, Scene &s)
 int
 main()
 {
-	Pixmap pm(320, 200);
+	Pixmap pm(640, 480);
 	MyFuncFace ff1;
 	Scene s(ff1);
 	s.light(Vector(-4.0f, 4.0f, -10.0f));
