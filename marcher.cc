@@ -193,10 +193,10 @@ class FuncFace {
 public:
 	virtual ~FuncFace() {}
 
-	virtual float f(float x, float z, Vector &n) const = 0;
-/*	Vector dx(float x, float z) const { return Vector(2.0f * eps, f(x + eps, z) - f(x - eps, z), 0.0f); }
-	Vector dz(float x, float z) const { return Vector(0.0f, f(x, z + eps) - f(x, z - eps), 2.0f * eps); }
-	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }*/
+	virtual float f(float x, float z, Vector *n) const = 0;
+	Vector dx(float x, float z) const { return Vector(2.0f * eps, f(x + eps, z, 0) - f(x - eps, z, 0), 0.0f); }
+	Vector dz(float x, float z) const { return Vector(0.0f, f(x, z + eps, 0) - f(x, z - eps, 0), 2.0f * eps); }
+	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }
 };
 
 template <class T>
@@ -206,6 +206,58 @@ public:
 
 	virtual T f(float x) const = 0;
 	virtual T df(float x) const = 0;
+};
+
+template <class T>
+class SmoothstepInterpolator : public Interpolator<T> {
+	const T p0_, p1_;
+
+public:
+	SmoothstepInterpolator(const T &p0, const T &p1)
+	: p0_(p0)
+	, p1_(p1)
+	{}
+
+	virtual T
+	f(float x)
+	const
+	{
+		float t = (3.0f - 2.0f * x ) * x * x;
+		return p0_ * (1.0f - t) + p1_ * t;
+	}
+
+	virtual T
+	df(float x)
+	const
+	{
+		return (1.0f - x) * 6.0f * x;
+	}
+};
+
+template <class T>
+class SmootherstepInterpolator : public Interpolator<T> {
+	const T p0_, p1_;
+
+public:
+	SmootherstepInterpolator(const T &p0, const T &p1)
+	: p0_(p0)
+	, p1_(p1)
+	{}
+
+	virtual T
+	f(float x)
+	const
+	{
+		float t = (10.0f + (6.0f * x - 15.0f) * x) * x * x * x;
+		return p0_ * (1.0f - t) + p1_ * t;
+	}
+
+	virtual T
+	df(float x)
+	const
+	{
+		return (1.0f + (x - 2.0f) * x) * 30.0f * x * x;
+	}
 };
 
 template <class T>
@@ -224,23 +276,23 @@ public:
 	f(float x)
 	const
 	{
-		T y = -0.5f * p0_ + 1.5f * p1_ - 1.5f * p2_ + 0.5f * p3_;
+		T y = (p1_ - p2_) * 1.5f + (p3_ - p0_) * 0.5f;
 		y *= x;
-		y += p0_ - 2.5 * p1_ + 2.0f * p2_ - 0.5f * p3_;
+		y += p0_ - p1_ * 2.5 + p2_ * 2.0f - p3_ * 0.5f;
 		y *= x;
-		y += -0.5f * p0_ + 0.5f * p2_;
-		return x * y + p1_;
+		y += (p2_ - p0_) * 0.5f;
+		return y * x + p1_;
 	}
 
 	virtual T
 	df(float x)
 	const
 	{
-		T y = -1.5f * p0_ + 4.5f * p1_ - 4.5f * p2_ + 1.5f * p3_;
+		T y = (p1_ - p2_) * 4.5f + (p3_ - p0_) * 1.5f;
 		y *= x;
-		y += 2.0f * p0_ - 5.0f * p1_ + 4.0f * p2_ - p3_;
+		y += p0_ * 2.0f - p1_ * 5.0f + p2_ * 4.0f - p3_;
 		y *= x;
-		return y + 0.5f * (p2_ - p0_);
+		return y + (p2_ - p0_) * 0.5f;
 	}
 };
 
@@ -250,11 +302,13 @@ class MyFuncFace : public FuncFace {
 
 public:
 //	virtual float f(float x, float z) const { return sinf(x) * sinf(z); }
-	virtual float f(float x, float z, Vector &n) const;
+	float g(float x, float z, Vector *n) const;
+	float h(float x, float z, Vector *n) const;
+	virtual float f(float x, float z, Vector *n) const;
 };
 
 float
-MyFuncFace::f(float x, float z, Vector &n)
+MyFuncFace::g(float x, float z, Vector *n)
 const
 {
 	int ix = int(floor(x));
@@ -270,16 +324,66 @@ const
 	float b = CubicInterpolator<float>(m[1][0], m[1][1], m[1][2], m[1][3]).f(x);
 	float c = CubicInterpolator<float>(m[2][0], m[2][1], m[2][2], m[2][3]).f(x);
 	float d = CubicInterpolator<float>(m[3][0], m[3][1], m[3][2], m[3][3]).f(x);
-	float e = CubicInterpolator<float>(m[0][0], m[1][0], m[2][0], m[3][0]).f(z);
-	float f = CubicInterpolator<float>(m[0][1], m[1][1], m[2][1], m[3][1]).f(z);
-	float g = CubicInterpolator<float>(m[0][2], m[1][2], m[2][2], m[3][2]).f(z);
-	float h = CubicInterpolator<float>(m[0][3], m[1][3], m[2][3], m[3][3]).f(z);
 	CubicInterpolator<float> ciz(a, b, c, d);
-	CubicInterpolator<float> cix(e, f, g, h);
-	float y = ciz.f(z);
-	float dz = -ciz.df(z);
-	float dx = -cix.df(x);
-	n = Vector(dx, 1.0f, dz).norm();
+	if (n) {
+		float e = CubicInterpolator<float>(m[0][0], m[1][0], m[2][0], m[3][0]).f(z);
+		float f = CubicInterpolator<float>(m[0][1], m[1][1], m[2][1], m[3][1]).f(z);
+		float g = CubicInterpolator<float>(m[0][2], m[1][2], m[2][2], m[3][2]).f(z);
+		float h = CubicInterpolator<float>(m[0][3], m[1][3], m[2][3], m[3][3]).f(z);
+		CubicInterpolator<float> cix(e, f, g, h);
+		*n = Vector(-cix.df(x), 1.0f, -ciz.df(z));
+	}
+	return ciz.f(z);
+}
+
+float
+MyFuncFace::h(float x, float z, Vector *n)
+const
+{
+	int ix = int(floor(x));
+	int iz = int(floor(z));
+	float ox = x, oz = z;
+	x -= ix, z -= iz;
+	float m[2][2] = {
+		{ noise2d(ix, iz), noise2d(ix + 1, iz) },
+		{ noise2d(ix, iz + 1), noise2d(ix + 1, iz + 1) }
+	};
+	float a = SmoothstepInterpolator<float>(m[0][0], m[0][1]).f(x);
+	float b = SmoothstepInterpolator<float>(m[1][0], m[1][1]).f(x);
+	SmoothstepInterpolator<float> ciz(a, b);
+	if (n) {
+/*		const float eps = 0.01f;
+		Vector dx(2.0f * eps, h(ox + eps, oz, 0) - h(ox - eps, oz, 0), 0.0f);
+		Vector dz(0.0f, h(ox, oz + eps, 0) - h(ox, oz - eps, 0), 2.0f * eps);
+		*n = Vector(dz % dx).norm();*/
+		float c = SmootherstepInterpolator<float>(m[0][0], m[1][0]).f(z);
+		float d = SmootherstepInterpolator<float>(m[0][1], m[1][1]).f(z);
+		SmootherstepInterpolator<float> cix(c, d);
+		*n = Vector(cix.df(x), 1.0f, ciz.df(z));
+	}
+	return ciz.f(z);
+}
+
+float
+MyFuncFace::f(float x, float z, Vector *n)
+const
+{
+	float y = 0.0f;
+	float a = 1.0f;
+	Vector no;
+	for (int i = 0; i < 6; ++i) {
+		float yo = a * h(x, z, n);
+//		if (n) yo /= n->dot(*n);
+		y += yo;
+		if (n) no = no + *n;
+		a *= 0.5f;
+		x *= 2.0f;
+		z *= 2.0f;
+	}
+	if (n) {
+		no.y(1.0f);
+		*n = no.norm();
+	}
 	return y;
 }
 
@@ -304,19 +408,22 @@ public:
 Pixel
 Scene::cast(const Ray &r)
 {
-	float tinc = 0.01f;
-	float tmin = 1.0f;
-	float tmax = 50.0f;
-	for (float t = tmin; t < tmax; t += tinc) {
+	const float step = 0.02f;
+	float dt = step;
+	float ldt = dt;
+	const float tmin = 1.0f;
+	const float tmax = 10.0f;
+	float ld = 0.0f;
+	for (float t = tmin; t < tmax; t += dt) {
 		Vector p(r.o() + r.d() * t);
-		Vector n;
-		float h = gnd_.f(p.x(), p.z(), n);
-		if (p.y() < h) {
-			if (tinc > 0.1f) {
-				t -= tinc;
-				tinc = 0.01f;
-				continue;
-			}
+		if (p.y() > 2.0f && r.d().y() > 0.0f) break;
+		float h = gnd_.f(p.x(), p.z(), 0);
+		float cd = h - p.y();
+		if (cd > 0.0f) {
+			t -= ldt * cd / (ld + cd);
+			p = r.o() + r.d() * t;
+			gnd_.f(p.x(), p.z(), 0);
+			Vector n(gnd_.n(p.x(), p.z()));
 			Vector l((light_ - p).norm());
 			Vector v((cam_ - p).norm());
 			Vector k(0.1f, l.dot(n));
@@ -325,13 +432,16 @@ Scene::cast(const Ray &r)
 			} else {
 				k.y(0.0f);
 			}
+//			return Pixel(h * h);
 			return Pixel(1.0f, 1.0f, 1.0f) * k.dot(Vector(0.1f, 0.6f, 0.3f));
-/*			if (n.x() < 0.0f) n.x(0.0f);
+			if (n.x() < 0.0f) n.x(0.0f);
 			if (n.y() < 0.0f) n.y(0.0f);
 			if (n.z() < 0.0f) n.z(0.0f);
-			return Pixel(n.x(), n.y(), n.z());*/
+			return Pixel(n.x(), n.y(), n.z());
 		}
-		tinc *= 1.1f;
+		ldt = dt;
+		ld = -cd;
+		dt = t * step;
 	}
 	return Pixel();
 }
@@ -352,10 +462,12 @@ Tracer::render(Pixmap &pm, Scene &s)
 	d.z(-1.0f / tanf((0.5f * fov_) * (M_PI / 180.0f)));
 	for (int y = 0; y < pm.h(); ++y) {
 		d.y(1.0f - 2.0f * y / (pm.h() - 1));
+		d.y(d.y() * pm.h() / pm.w());
 		for (int x = 0; x < pm.w(); ++x) {
 			d.x(2.0f * x / (pm.w() - 1) - 1.0f);
 			pm.at(x, y) = s.cast(Ray(s.cam(), d));
 		}
+		std::cout << y << std::endl;
 	}
 	return pm;
 }
@@ -366,8 +478,8 @@ main()
 	Pixmap pm(640, 480);
 	MyFuncFace ff1;
 	Scene s(ff1);
-	s.light(Vector(-4.0f, 4.0f, -10.0f));
-	s.cam(Vector(0.0f, 4.0f, 0.0f));
+	s.light(Vector(0.0f, 4.0f, 0.0f));
+	s.cam(Vector(0.0f, 1.0f, 0.0f));
 	Netbpm("x.ppm").save(Tracer(90.0f).render(pm, s));
 	return 0;
 }
