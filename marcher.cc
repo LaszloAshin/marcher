@@ -193,10 +193,10 @@ class FuncFace {
 public:
 	virtual ~FuncFace() {}
 
-	virtual float f(float x, float z) const = 0;
-	Vector dx(float x, float z) const { return Vector(2.0f * eps, f(x + eps, z) - f(x - eps, z), 0.0f); }
+	virtual float f(float x, float z, Vector &n) const = 0;
+/*	Vector dx(float x, float z) const { return Vector(2.0f * eps, f(x + eps, z) - f(x - eps, z), 0.0f); }
 	Vector dz(float x, float z) const { return Vector(0.0f, f(x, z + eps) - f(x, z - eps), 2.0f * eps); }
-	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }
+	Vector n(float x, float z) const { return (dz(x, z) % dx(x, z)).norm(); }*/
 };
 
 template <class T>
@@ -204,7 +204,8 @@ class Interpolator {
 public:
 	virtual ~Interpolator() {}
 
-	virtual T at(float x) const = 0;
+	virtual T f(float x) const = 0;
+	virtual T df(float x) const = 0;
 };
 
 template <class T>
@@ -220,15 +221,26 @@ public:
 	{}
 
 	virtual T
-	at(float x)
+	f(float x)
 	const
 	{
-		float fx = -0.5f * p0_ + 1.5f * p1_ - 1.5f * p2_ + 0.5f * p3_;
-		fx *= x;
-		fx += p0_ - 2.5 * p1_ + 2.0f * p2_ - 0.5f * p3_;
-		fx *= x;
-		fx += -0.5f * p0_ + 0.5f * p2_;
-		return x * fx + p1_;
+		T y = -0.5f * p0_ + 1.5f * p1_ - 1.5f * p2_ + 0.5f * p3_;
+		y *= x;
+		y += p0_ - 2.5 * p1_ + 2.0f * p2_ - 0.5f * p3_;
+		y *= x;
+		y += -0.5f * p0_ + 0.5f * p2_;
+		return x * y + p1_;
+	}
+
+	virtual T
+	df(float x)
+	const
+	{
+		T y = -1.5f * p0_ + 4.5f * p1_ - 4.5f * p2_ + 1.5f * p3_;
+		y *= x;
+		y += 2.0f * p0_ - 5.0f * p1_ + 4.0f * p2_ - p3_;
+		y *= x;
+		return y + 0.5f * (p2_ - p0_);
 	}
 };
 
@@ -238,21 +250,37 @@ class MyFuncFace : public FuncFace {
 
 public:
 //	virtual float f(float x, float z) const { return sinf(x) * sinf(z); }
-	virtual float f(float x, float z) const;
+	virtual float f(float x, float z, Vector &n) const;
 };
 
 float
-MyFuncFace::f(float x, float z)
+MyFuncFace::f(float x, float z, Vector &n)
 const
 {
 	int ix = int(floor(x));
 	int iz = int(floor(z));
 	x -= ix, z -= iz;
-	float a = CubicInterpolator<float>(noise2d(ix - 1, iz - 1), noise2d(ix, iz - 1), noise2d(ix + 1, iz - 1), noise2d(ix + 2, iz - 1)).at(x);
-	float b = CubicInterpolator<float>(noise2d(ix - 1, iz), noise2d(ix, iz), noise2d(ix + 1, iz), noise2d(ix + 2, iz)).at(x);
-	float c = CubicInterpolator<float>(noise2d(ix - 1, iz + 1), noise2d(ix, iz + 1), noise2d(ix + 1, iz + 1), noise2d(ix + 2, iz + 1)).at(x);
-	float d = CubicInterpolator<float>(noise2d(ix - 1, iz + 2), noise2d(ix, iz + 2), noise2d(ix + 1, iz + 2), noise2d(ix + 2, iz + 2)).at(x);
-	return CubicInterpolator<float>(a, b, c, d).at(z);
+	float m[4][4] = {
+		{ noise2d(ix - 1, iz - 1), noise2d(ix, iz - 1), noise2d(ix + 1, iz - 1), noise2d(ix + 2, iz - 1) },
+		{ noise2d(ix - 1, iz), noise2d(ix, iz), noise2d(ix + 1, iz), noise2d(ix + 2, iz) },
+		{ noise2d(ix - 1, iz + 1), noise2d(ix, iz + 1), noise2d(ix + 1, iz + 1), noise2d(ix + 2, iz + 1) },
+		{ noise2d(ix - 1, iz + 2), noise2d(ix, iz + 2), noise2d(ix + 1, iz + 2), noise2d(ix + 2, iz + 2) }
+	};
+	float a = CubicInterpolator<float>(m[0][0], m[0][1], m[0][2], m[0][3]).f(x);
+	float b = CubicInterpolator<float>(m[1][0], m[1][1], m[1][2], m[1][3]).f(x);
+	float c = CubicInterpolator<float>(m[2][0], m[2][1], m[2][2], m[2][3]).f(x);
+	float d = CubicInterpolator<float>(m[3][0], m[3][1], m[3][2], m[3][3]).f(x);
+	float e = CubicInterpolator<float>(m[0][0], m[1][0], m[2][0], m[3][0]).f(z);
+	float f = CubicInterpolator<float>(m[0][1], m[1][1], m[2][1], m[3][1]).f(z);
+	float g = CubicInterpolator<float>(m[0][2], m[1][2], m[2][2], m[3][2]).f(z);
+	float h = CubicInterpolator<float>(m[0][3], m[1][3], m[2][3], m[3][3]).f(z);
+	CubicInterpolator<float> ciz(a, b, c, d);
+	CubicInterpolator<float> cix(e, f, g, h);
+	float y = ciz.f(z);
+	float dz = -ciz.df(z);
+	float dx = -cix.df(x);
+	n = Vector(dx, 1.0f, dz).norm();
+	return y;
 }
 
 class Scene {
@@ -281,14 +309,14 @@ Scene::cast(const Ray &r)
 	float tmax = 50.0f;
 	for (float t = tmin; t < tmax; t += tinc) {
 		Vector p(r.o() + r.d() * t);
-		float h = gnd_.f(p.x(), p.z());
+		Vector n;
+		float h = gnd_.f(p.x(), p.z(), n);
 		if (p.y() < h) {
 			if (tinc > 0.1f) {
 				t -= tinc;
 				tinc = 0.01f;
 				continue;
 			}
-			Vector n(gnd_.n(p.x(), p.z()));
 			Vector l((light_ - p).norm());
 			Vector v((cam_ - p).norm());
 			Vector k(0.1f, l.dot(n));
@@ -298,6 +326,10 @@ Scene::cast(const Ray &r)
 				k.y(0.0f);
 			}
 			return Pixel(1.0f, 1.0f, 1.0f) * k.dot(Vector(0.1f, 0.6f, 0.3f));
+/*			if (n.x() < 0.0f) n.x(0.0f);
+			if (n.y() < 0.0f) n.y(0.0f);
+			if (n.z() < 0.0f) n.z(0.0f);
+			return Pixel(n.x(), n.y(), n.z());*/
 		}
 		tinc *= 1.1f;
 	}
