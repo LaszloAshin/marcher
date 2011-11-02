@@ -5,37 +5,43 @@
 #include <cmath>
 #include <cassert>
 
+// http://rrrola.wz.cz/inv_sqrt.html
+float
+invsqrt(float x)
+{
+	union { float f; unsigned u; } y = { x };
+	y.u = 0x5F1FFFF9ul - (y.u >> 1);
+	return 0.703952253f * y.f * (2.38924456f - x * y.f * y.f);
+}
+
 class Vector {
-	float x_, y_, z_, w_;
+	float x_, y_, z_;
 
 public:
-	Vector(float x = 0.0f, float y = 0.0f, float z = 0.0f, float w = 1.0f)
+	explicit
+	Vector(float x = 0.0f, float y = 0.0f, float z = 0.0f)
 	: x_(x)
 	, y_(y)
 	, z_(z)
-	, w_(w)
 	{}
 
 	float x() const { return x_; }
 	float y() const { return y_; }
 	float z() const { return z_; }
-	float w() const { return w_; }
 
 	Vector &x(float x) { x_ = x; return *this; }
 	Vector &y(float y) { y_ = y; return *this; }
 	Vector &z(float z) { z_ = z; return *this; }
-	Vector &w(float w) { w_ = w; return *this; }
 
-	Vector h() const { return Vector(x_ / w_, y_ / w_, z_ / w_); }
-
-	Vector operator*(float s) const { return Vector(x_ * s, y_ * s, z_ * s, w_); }
-	Vector operator+(const Vector &v) const { return Vector(x_ / w_ + v.x_ / v.w_, y_ / w_ + v.y_ / v.w_, z_ / w_ + v.z_ / v.w_); }
-	Vector operator-(const Vector &v) const { return Vector(x_ / w_ - v.x_ / v.w_, y_ / w_ - v.y_ / v.w_, z_ / w_ - v.z_ / v.w_); }
-
-	float l() const { float x(x_ / w_), y(y_ / w_), z(z_ / w_); return sqrtf(x * x + y * y + z * z); }
-	Vector norm() const { float len(l()); return Vector(x_ / len, y_ / len, z_ / len); }
+	Vector operator*(float s) const { return Vector(x_ * s, y_ * s, z_ * s); }
+	Vector operator+(const Vector &v) const { return Vector(x_ + v.x_, y_ + v.y_, z_ + v.z_); }
+	Vector operator-(const Vector &v) const { return Vector(x_ - v.x_, y_ - v.y_, z_ - v.z_); }
 
 	float dot(const Vector &v) const { return x_ * v.x_ + y_ * v.y_ + z_ * v.z_; }
+
+	float il() const { return invsqrt(dot(*this)); }
+	Vector norm() const { return *this * il(); }
+
 	Vector operator%(const Vector &v) const;
 };
 
@@ -51,52 +57,31 @@ const
 }
 
 class Pixel {
-	float r_, g_, b_, a_;
+	float r_, g_, b_;
 
 public:
-	Pixel(float r = 0.0f, float g = 0.0f, float b = 0.0f, float a = 1.0f)
+	explicit
+	Pixel(float r = 0.0f, float g = 0.0f, float b = 0.0f)
 	: r_(r)
 	, g_(g)
 	, b_(b)
-	, a_(a)
 	{}
 
 	float r() const { return r_; }
 	float g() const { return g_; }
 	float b() const { return b_; }
-	float a() const { return a_; }
 
 	Pixel &r(float r) { r_ = r; return *this; }
 	Pixel &g(float g) { g_ = g; return *this; }
 	Pixel &b(float b) { b_ = b; return *this; }
-	Pixel &a(float a) { a_ = a; return *this; }
 
-	Pixel &min(const Pixel &p);
-	Pixel &max(const Pixel &p);
-
-	Pixel operator*(float s) const { return Pixel(r_ * s, g_ * s, b_ * s, a_ * s); }
+	Pixel operator*(float s) const { return Pixel(r_ * s, g_ * s, b_ * s); }
 	Pixel operator+(const Pixel &p) const { return Pixel(r_ + p.r_, g_ + p.g_, b_ + p.b_); }
+	Pixel operator-(const Pixel &p) const { return Pixel(r_ - p.r_, g_ - p.g_, b_ - p.b_); }
+	float dot(const Pixel &p) const { return r_ * p.r_ + g_ * p.g_ + b_ * p.b_; }
+
+	float d(const Pixel &p) const { Pixel d(*this - p); return d.dot(d); }
 };
-
-Pixel &
-Pixel::min(const Pixel &p)
-{
-	if (p.r_ < r_) r_ = p.r_;
-	if (p.g_ < g_) g_ = p.g_;
-	if (p.b_ < b_) b_ = p.b_;
-	if (p.a_ < a_) a_ = p.a_;
-	return *this;
-}
-
-Pixel &
-Pixel::max(const Pixel &p)
-{
-	if (p.r_ > r_) r_ = p.r_;
-	if (p.g_ > g_) g_ = p.g_;
-	if (p.b_ > b_) b_ = p.b_;
-	if (p.a_ > a_) a_ = p.a_;
-	return *this;
-}
 
 class Pixmap {
 	size_t w_, h_;
@@ -118,7 +103,6 @@ public:
 	const Pixel &at(int x, int y) const { return pm_[o(x, y)]; }
 
 	Pixmap &clear(const Pixel &p = Pixel());
-	std::pair<Pixel, Pixel> minmax() const;
 };
 
 Pixmap &
@@ -126,18 +110,6 @@ Pixmap::clear(const Pixel &p)
 {
 	for (size_t i = 0; i < pm_.size(); ++i) pm_[i] = p;
 	return *this;
-}
-
-std::pair<Pixel, Pixel>
-Pixmap::minmax()
-const
-{
-	Pixel min(pm_[0]), max(pm_[0]);
-	for (size_t i = 1; i < pm_.size(); ++i) {
-		min.min(pm_[i]);
-		max.max(pm_[i]);
-	}
-	return std::make_pair(min, max);
 }
 
 class Netbpm {
@@ -157,18 +129,11 @@ Netbpm::save(const Pixmap &pm, float scale)
 	std::ofstream ofs(fn_.c_str());
 	ofs << "P3" << std::endl;
 	ofs << pm.w() << " " << pm.h() << std::endl;
-	Pixel max(pm.minmax().second);
-	float maxval = max.r();
-	if (max.g() > maxval) maxval = max.g();
-	if (max.b() > maxval) maxval = max.b();
-	ofs << unsigned(maxval * scale) << std::endl;
+	ofs << int(scale) << std::endl;
 	for (size_t y = 0; y < pm.h(); ++y) {
 		for (size_t x = 0; x < pm.w(); ++x) {
 			Pixel p(pm.at(x, y) * scale);
-			ofs << std::setw(4) << unsigned(p.r());
-			ofs << std::setw(4) << unsigned(p.g());
-			ofs << std::setw(4) << unsigned(p.b());
-			ofs << std::setw(4) << "";
+			ofs << int(p.r()) << " " << int(p.g()) << " " << int(p.b()) << " ";
 		}
 		ofs << std::endl;
 	}
@@ -245,7 +210,8 @@ public:
 	df(float x)
 	const
 	{
-		return (1.0f - x) * 6.0f * x;
+		float t = (1.0f - x) * 6.0f * x;
+		return p0_ * (1.0f - t) + p1_ * t; // XXX: ez szar
 	}
 };
 
@@ -271,7 +237,8 @@ public:
 	df(float x)
 	const
 	{
-		return (1.0f + (x - 2.0f) * x) * 30.0f * x * x;
+		float t = (1.0f + (x - 2.0f) * x) * 30.0f * x * x;
+		return p0_ * (1.0f - t) + p1_ * t; // XXX: ez szar
 	}
 };
 
@@ -474,7 +441,7 @@ const
 {
 	float f = 0.0f;
 	float a = 1.0f;
-//	x *= 10.0f, y *= 10.0f, z *= 10.0f;
+//	x /= 100.0f, y /= 100.0f, z /= 100.0f;
 	for (int i = 0; i < 3; ++i) {
 		f += a * PerlinNoise::trilinear(x, y, z);
 		a *= 0.5f;
@@ -517,7 +484,7 @@ const
 		dt = t * step;
 		Vector p(r.o() + r.d() * t);
 		if (p.y() > 2.0f) {
-			d += cld_.f(p.x(), p.y(), p.z());
+			d += cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
 			if (r.d().y() > 0.0f) continue;
 		}
 		float hg = gnd_.f(p.x(), p.z());
@@ -566,7 +533,7 @@ const
 	}
 	float blu = r.d().y() * r.d().y();
 	blu = 0.5f - 0.5f * blu;
-	return SmoothstepInterpolator<Pixel>(Pixel(blu, blu, 1.0f), Pixel(1.0f, 1.0f, 1.0f)).f(clamp(5.0f / tmax * d, 0.0f, 1.0f));
+	return SmoothstepInterpolator<Pixel>(Pixel(blu, blu, 1.0f), Pixel(1.0f, 1.0f, 1.0f)).f(clamp(d / tmax, 0.0f, 1.0f));
 }
 
 class Tracer {
@@ -575,22 +542,66 @@ class Tracer {
 public:
 	Tracer(float fov) : fov_(fov) {}
 
+	static float halton(int base, int n);
+	Ray genRay(const Pixmap &pm, float x, float y, const Scene &s) const;
 	Pixmap &render(Pixmap &pm, Scene &s);
 };
+
+float
+Tracer::halton(int base, int n)
+{
+	float ret = 0.0f;
+	int b = base;
+
+	while (n) {
+		ret += (float)(n % base) / b;
+		b *= base;
+		n /= base;
+	}
+	return ret;
+}
+
+Ray
+Tracer::genRay(const Pixmap &pm, float x, float y, const Scene &s)
+const
+{
+	return Ray(
+		s.cam(),
+		Vector(
+			2.0f * x / pm.w() - 1.0f,
+			(1.0f - 2.0f * y / pm.h()) * pm.h() / pm.w(),
+			-1.0f / tanf((0.5f * fov_) * (M_PI / 180.0f))
+		)
+	);
+}
 
 Pixmap &
 Tracer::render(Pixmap &pm, Scene &s)
 {
-	Vector d;
-	d.z(-1.0f / tanf((0.5f * fov_) * (M_PI / 180.0f)));
+	const float EDGE_LIMIT = 0.01f;
+	const int OVERSAMPLE = 4;
+
+	std::vector<Pixel> pl(pm.w() + 1);
+	for (int x = 0; x <= pm.w(); ++x) {
+		pl[x] = s.cast(genRay(pm, x, 0.0f, s));
+	}
 	for (int y = 0; y < pm.h(); ++y) {
-		d.y(1.0f - 2.0f * y / (pm.h() - 1));
-		d.y(d.y() * pm.h() / pm.w());
+		Pixel pp(s.cast(genRay(pm, 0.0f, 1.0f + y, s)));
 		for (int x = 0; x < pm.w(); ++x) {
-			d.x(2.0f * x / (pm.w() - 1) - 1.0f);
-			Ray r(s.cam(), d);
-			pm.at(x, y) = s.cast(r);
+			Pixel p(s.cast(genRay(pm, 1.0f + x, 1.0f + y, s)));
+			Pixel a = pl[x] + pl[x + 1] + pp + p;
+			int na = 4;
+			if (pl[x].d(p) > EDGE_LIMIT || pl[x + 1].d(pp) > EDGE_LIMIT) {
+				for (int i = 1; i <= OVERSAMPLE; ++i) {
+					a = a + s.cast(genRay(pm, halton(2, i) + x, halton(3, i) + y, s));
+					++na;
+				}
+			}
+			pm.at(x, y) = a * (1.0f / na);
+			pl[x] = pp;
+			pp = p;
 		}
+		pl[pm.w()] = pp;
 		std::cout << y << std::endl;
 	}
 	return pm;
