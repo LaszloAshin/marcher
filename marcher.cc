@@ -155,7 +155,7 @@ public:
 };
 
 float
-clamp(float x, float l, float h)
+clamp(float x, float l = 0.0f, float h = 1.0f)
 {
 	if (x < l) {
 		return l;
@@ -284,7 +284,7 @@ public:
 	virtual ~FuncFace() {}
 
 	virtual float f(float x, float z) const = 0;
-	virtual Pixel color(const Vector &k) const = 0;
+	virtual Pixel color(const Vector &p, const Vector &k, const Vector &n) const = 0;
 };
 
 class FuncFaceDerivator {
@@ -376,7 +376,7 @@ PerlinNoise::trilinear(float x, float y, float z)
 class Ground : public FuncFace {
 public:
 	virtual float f(float x, float z) const;
-	virtual Pixel color(const Vector &k) const;
+	virtual Pixel color(const Vector &p, const Vector &k, const Vector &n) const;
 };
 
 float
@@ -396,16 +396,31 @@ const
 }
 
 Pixel
-Ground::color(const Vector &k)
+Ground::color(const Vector &p, const Vector &k, const Vector &n)
 const
 {
-	return Pixel(1.0f, 0.5f, 0.0f) * k.dot(Vector(0.3f, 0.7f, 0.0f));
+	float r = 0.0f;
+	float a = 1.0f;
+	float x = 4.0f * p.x();
+	float z = 4.0f * p.z();
+	for (int i = 0; i < 6; ++i) {
+		r += a * PerlinNoise::bilinear(x, z);
+		a *= 0.5f;
+		x *= 2.0f;
+		z *= 2.0f;
+	}
+	float t = 1.0f - (1.0f + r * r) / 3.0f;
+	Pixel sand(Pixel(0.8f, 0.6f, 0.4f) * (t * k.dot(Vector(0.3f, 0.7f, 0.0f))));
+	Pixel grass(Pixel(0.2f, 0.8f, 0.2f) * (t * k.dot(Vector(0.2f, 0.7f, 0.1f))));
+	Pixel snow(Pixel(1.0f, 1.0f, 1.0f) * k.dot(Vector(0.8f, 0.2f, 0.0f)));
+	Pixel pix(SmoothstepInterpolator<Pixel>(sand, grass).f(pow(clamp(n.y() + 0.1f), 4.0f)));
+	return SmoothstepInterpolator<Pixel>(pix, snow).f(pow(clamp(p.y() + r, 0.0f, 1.0f), 8.0f));
 }
 
 class Water : public FuncFace {
 public:
 	virtual float f(float x, float z) const;
-	virtual Pixel color(const Vector &k) const;
+	virtual Pixel color(const Vector &p, const Vector &k, const Vector &n) const;
 };
 
 float
@@ -425,7 +440,7 @@ const
 }
 
 Pixel
-Water::color(const Vector &k)
+Water::color(const Vector &p, const Vector &k, const Vector &n)
 const
 {
 	return Pixel(0.1f, 0.5f, 1.0f) * k.dot(Vector(0.1f, 0.4f, 0.5f));
@@ -500,7 +515,7 @@ const
 	float dt = step;
 	float ldt = dt;
 	const float tmin = 1.0f;
-	const float tmax = 50.0f;
+	const float tmax = 25.0f;
 	float ldg = 0.0f;
 	float ldw = 0.0f;
 	float blu = r.d().y() * r.d().y();
@@ -511,13 +526,13 @@ const
 	for (float t = tmin; t < tmax; t += dt) {
 		dt = t * step; // non-linear steps
 		Vector p(r.o() + r.d() * t);
-		float pd = tmax / 100.0f;
+		float pd = tmax / 30.0f * dt;
 		if (p.y() > 2.0f) {
-			pd = cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
+			pd = dt * cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
 		} else if (isInShadow(p)) {
 			sh += pd;
 		}
-		d += pd * dt;
+		d += pd;
 		if (p.y() > 2.0f) {
 			if (r.d().y() > 0.0f) continue;
 		}
@@ -542,7 +557,7 @@ const
 			Vector n(FuncFaceDerivator(*ff).n(p.x(), p.z()));
 			Vector l(((inShad ? cam_ : light_) - p).norm());
 			Vector v((cam_ - p).norm());
-			Vector k(0.1f, l.dot(n));
+			Vector k(1.0f, l.dot(n));
 			if (k.y() > 0.0f) {
 				k.z(powf(((n * k.y() - l) * 2.0f + l).dot(v), 8.0f));
 			} else {
@@ -553,7 +568,7 @@ const
 //			float f = fmaxf(t / tmax, 0.75f * (-1.2f - p.y()));
 //			float f = t / tmax;
 //			return SmoothstepInterpolator<Pixel>(ff->color(k), Pixel(0.5f, 0.5f, 0.5f)).f(powf(clamp(f, 0.0f, 1.0f), 0.5f));
-			pix = ff->color(k);
+			pix = ff->color(p, k, n);
 			break;
 /*			if (n.x() < 0.0f) n.x(0.0f);
 			if (n.y() < 0.0f) n.y(0.0f);
@@ -645,8 +660,8 @@ main()
 {
 	Pixmap pm(1920, 1080);
 	Scene s;
-	s.light(Vector(5.0f, 5.0f, -10.0f));
-	s.cam(Vector(22.0f, 1.0f, 1.0f));
+	s.cam(Vector(-22.0f, 1.0f, 1.0f));
+	s.light(s.cam() + Vector(-17.0f, 4.0f, -11.0f));
 	Netbpm("x.ppm").save(Tracer(120.0f).render(pm, s));
 	return 0;
 }
