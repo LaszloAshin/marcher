@@ -41,6 +41,7 @@ public:
 
 	float il() const { return invsqrt(dot(*this)); }
 	Vector norm() const { return *this * il(); }
+	float len() const { return 1.0f / il(); }
 
 	Vector operator%(const Vector &v) const;
 };
@@ -398,7 +399,7 @@ Pixel
 Ground::color(const Vector &k)
 const
 {
-	return Pixel(1.0f, 0.5f, 0.0f) * k.dot(Vector(0.2f, 0.8f, 0.0f));
+	return Pixel(1.0f, 0.5f, 0.0f) * k.dot(Vector(0.3f, 0.7f, 0.0f));
 }
 
 class Water : public FuncFace {
@@ -427,7 +428,7 @@ Pixel
 Water::color(const Vector &k)
 const
 {
-	return Pixel(0.1f, 0.5f, 1.0f) * k.dot(Vector(0.1f, 0.6f, 0.3f));
+	return Pixel(0.1f, 0.5f, 1.0f) * k.dot(Vector(0.1f, 0.4f, 0.5f));
 }
 
 class Clouds {
@@ -441,7 +442,7 @@ const
 {
 	float f = 0.0f;
 	float a = 1.0f;
-//	x /= 100.0f, y /= 100.0f, z /= 100.0f;
+//	x /= 10.0f, y /= 10.0f, z /= 10.0f;
 	for (int i = 0; i < 3; ++i) {
 		f += a * PerlinNoise::trilinear(x, y, z);
 		a *= 0.5f;
@@ -465,36 +466,63 @@ public:
 
 	const Vector &cam() const { return cam_; }
 
+	bool isInShadow(const Vector &v) const;
 	Pixel cast(const Ray &r) const;
 };
+
+bool
+Scene::isInShadow(const Vector &v)
+const
+{
+	Ray r(v, (light_ - v).norm());
+	const float step = 0.2f;
+	float dt = step;
+	const float tmin = 0.0f;
+	const float tmax = (light_ - v).len();
+	for (float t = tmin; t < tmax; t += dt) {
+		dt = (1.0f + t) * step;
+		Vector p(r.o() + r.d() * t);
+		if (p.y() > 2.0f) {
+			if (r.d().y() > 0.0f) break;
+		}
+		if (gnd_.f(p.x(), p.z()) > p.y()) {
+			return true;
+		}
+	}
+	return false;
+}
 
 Pixel
 Scene::cast(const Ray &r)
 const
 {
-	const float step = 0.02f;
+	const float step = 0.01f;
 	float dt = step;
 	float ldt = dt;
 	const float tmin = 1.0f;
 	const float tmax = 50.0f;
 	float ldg = 0.0f;
 	float ldw = 0.0f;
+	float blu = r.d().y() * r.d().y();
+	blu = 0.5f - 0.5f * blu;
+	Pixel pix(blu, blu, 1.0f);
+	float sh = 0.0f;
 	float d = 0.0f;
 	for (float t = tmin; t < tmax; t += dt) {
-		dt = t * step;
+		dt = t * step; // non-linear steps
 		Vector p(r.o() + r.d() * t);
+		float pd = tmax / 100.0f;
 		if (p.y() > 2.0f) {
-			d += cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
+			pd = cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
+		} else if (isInShadow(p)) {
+			sh += pd;
+		}
+		d += pd * dt;
+		if (p.y() > 2.0f) {
 			if (r.d().y() > 0.0f) continue;
 		}
 		float hg = gnd_.f(p.x(), p.z());
 		float hw = wtr_.f(p.x(), p.z());
-		const FuncFace *ff;
-		if (hw > hg) {
-			ff = &wtr_;
-		} else {
-			ff = &gnd_;
-		}
 		float cdg = hg - p.y();
 		float cdw = hw - p.y();
 		if (fmaxf(cdg, cdw) > 0.0f) {
@@ -504,13 +532,15 @@ const
 				t -= ldt * cdw / (ldw + cdw);
 			}
 			p = r.o() + r.d() * t;
+			const FuncFace *ff;
 			if (wtr_.f(p.x(), p.z()) > gnd_.f(p.x(), p.z())) {
 				ff = &wtr_;
 			} else {
 				ff = &gnd_;
 			}
+			bool inShad = isInShadow(p - (r.d() * ldt));
 			Vector n(FuncFaceDerivator(*ff).n(p.x(), p.z()));
-			Vector l((light_ - p).norm());
+			Vector l(((inShad ? cam_ : light_) - p).norm());
 			Vector v((cam_ - p).norm());
 			Vector k(0.1f, l.dot(n));
 			if (k.y() > 0.0f) {
@@ -518,10 +548,13 @@ const
 			} else {
 				k.y(0.0f);
 			}
+			if (inShad) k = k * 0.5f;
 //			return Pixel(h * h);
-			float f = fmaxf(t / tmax, 0.75f * (-1.2f - p.y()));
+//			float f = fmaxf(t / tmax, 0.75f * (-1.2f - p.y()));
 //			float f = t / tmax;
-			return SmoothstepInterpolator<Pixel>(ff->color(k), Pixel(0.5f, 0.5f, 0.5f)).f(powf(clamp(f, 0.0f, 1.0f), 0.5f));
+//			return SmoothstepInterpolator<Pixel>(ff->color(k), Pixel(0.5f, 0.5f, 0.5f)).f(powf(clamp(f, 0.0f, 1.0f), 0.5f));
+			pix = ff->color(k);
+			break;
 /*			if (n.x() < 0.0f) n.x(0.0f);
 			if (n.y() < 0.0f) n.y(0.0f);
 			if (n.z() < 0.0f) n.z(0.0f);
@@ -531,9 +564,9 @@ const
 		ldg = -cdg;
 		ldw = -cdw;
 	}
-	float blu = r.d().y() * r.d().y();
-	blu = 0.5f - 0.5f * blu;
-	return SmoothstepInterpolator<Pixel>(Pixel(blu, blu, 1.0f), Pixel(1.0f, 1.0f, 1.0f)).f(clamp(d / tmax, 0.0f, 1.0f));
+	float col = 1.0f - clamp(sh / d, 0.0f, 1.0f);
+//	float col = 1.0f;
+	return SmoothstepInterpolator<Pixel>(pix, Pixel(col, col, col)).f(pow(clamp(0.25f * d / tmax, 0.0f, 1.0f), 0.25f));
 }
 
 class Tracer {
@@ -579,7 +612,7 @@ Pixmap &
 Tracer::render(Pixmap &pm, Scene &s)
 {
 	const float EDGE_LIMIT = 0.01f;
-	const int OVERSAMPLE = 4;
+	const int OVERSAMPLE = 8;
 
 	std::vector<Pixel> pl(pm.w() + 1);
 	for (int x = 0; x <= pm.w(); ++x) {
@@ -612,7 +645,7 @@ main()
 {
 	Pixmap pm(1920, 1080);
 	Scene s;
-	s.light(Vector(10.0f, 4.0f, 10.0f));
+	s.light(Vector(5.0f, 5.0f, -10.0f));
 	s.cam(Vector(22.0f, 1.0f, 1.0f));
 	Netbpm("x.ppm").save(Tracer(120.0f).render(pm, s));
 	return 0;
