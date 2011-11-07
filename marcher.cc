@@ -1,3 +1,8 @@
+/**
+ * Raymarcher by Laszlo Ashin 2o11.
+ * g++ -c marcher.cc -march=native -O3 -fomit-frame-pointer -pipe -Wall -pedantic -pthread
+ */
+
 #include <iostream>
 #include <vector>
 #include <fstream>
@@ -476,6 +481,14 @@ class Scene {
 	Vector cam_;
 
 public:
+	Scene()
+	: gnd_()
+	, wtr_()
+	, cld_()
+	, light_()
+	, cam_()
+	{}
+
 	Scene &light(const Vector &light) { light_ = light; return *this; }
 	Scene &cam(const Vector &cam) { cam_ = cam; return *this; }
 
@@ -630,12 +643,12 @@ Tracer::render(Pixmap &pm, Scene &s)
 	const int OVERSAMPLE = 8;
 
 	std::vector<Pixel> pl(pm.w() + 1);
-	for (int x = 0; x <= pm.w(); ++x) {
+	for (size_t x = 0; x <= pm.w(); ++x) {
 		pl[x] = s.cast(genRay(pm, x, 0.0f, s));
 	}
-	for (int y = 0; y < pm.h(); ++y) {
+	for (size_t y = 0; y < pm.h(); ++y) {
 		Pixel pp(s.cast(genRay(pm, 0.0f, 1.0f + y, s)));
-		for (int x = 0; x < pm.w(); ++x) {
+		for (size_t x = 0; x < pm.w(); ++x) {
 			Pixel p(s.cast(genRay(pm, 1.0f + x, 1.0f + y, s)));
 			Pixel a = pl[x] + pl[x + 1] + pp + p;
 			int na = 4;
