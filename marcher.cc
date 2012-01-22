@@ -9,6 +9,8 @@
 #include <iomanip>
 #include <cmath>
 #include <cassert>
+#include <pthread.h>
+#include <list>
 
 // http://rrrola.wz.cz/inv_sqrt.html
 float
@@ -534,7 +536,7 @@ const
 	float blu = r.d().y() * r.d().y();
 	blu = 0.5f - 0.5f * blu;
 	Pixel pix(blu, blu, 1.0f);
-	float sh = 0.0f;
+//	float sh = 0.0f;
 	float d = 0.0f;
 	for (float t = tmin; t < tmax; t += dt) {
 		dt = t * step; // non-linear steps
@@ -542,8 +544,8 @@ const
 		float pd = tmax / 30.0f * dt;
 		if (p.y() > 2.0f) {
 			pd = dt * cld_.f(p.x() - 0.99f * r.o().x(), p.y() - 0.99f * r.o().y(), p.z());
-		} else if (isInShadow(p)) {
-			sh += pd;
+//		} else if (isInShadow(p)) {
+//			sh += pd;
 		}
 		d += pd;
 		if (p.y() > 2.0f) {
@@ -576,7 +578,7 @@ const
 			} else {
 				k.y(0.0f);
 			}
-			if (inShad) k = k * 0.5f;
+			if (inShad) k = k * 0.25f;
 //			return Pixel(h * h);
 //			float f = fmaxf(t / tmax, 0.75f * (-1.2f - p.y()));
 //			float f = t / tmax;
@@ -592,10 +594,249 @@ const
 		ldg = -cdg;
 		ldw = -cdw;
 	}
-	float col = 1.0f - clamp(sh / d, 0.0f, 1.0f);
-//	float col = 1.0f;
+//	float col = 1.0f - clamp(sh / d, 0.0f, 1.0f);
+	float col = 1.0f;
 	return SmoothstepInterpolator<Pixel>(pix, Pixel(col, col, col)).f(pow(clamp(0.25f * d / tmax, 0.0f, 1.0f), 0.25f));
 }
+
+class IRunnable {
+public:
+	virtual ~IRunnable() {}
+
+	virtual void run() = 0;
+};
+
+class Thread {
+	IRunnable &r_;
+
+protected:
+	void run() { r_.run(); }
+
+public:
+	Thread(IRunnable &r) : r_(r) {}
+	virtual ~Thread() {}
+};
+
+class Pthread : public Thread {
+	union Castor {
+		void *p;
+		Pthread *pth;
+	};
+
+	pthread_t th_;
+
+	static void *routine(void *p);
+
+public:
+	Pthread(IRunnable &r);
+	virtual ~Pthread();
+};
+
+void *
+Pthread::routine(void *p)
+{
+	Castor c;
+
+	c.p = p;
+	c.pth->run();
+	return 0;
+}
+
+Pthread::Pthread(IRunnable &r)
+: Thread(r)
+, th_(0)
+{
+	Castor c;
+
+	c.pth = this;
+	assert(!pthread_create(&th_, 0, &Pthread::routine, c.p));
+}
+
+Pthread::~Pthread()
+{
+	assert(!pthread_join(th_, 0));
+}
+
+class ILockable {
+public:
+	virtual ~ILockable() {}
+
+	virtual void lock() = 0;
+	virtual void unlock() = 0;
+};
+
+class AutoLocker {
+	ILockable &lockable_;
+
+public:
+	AutoLocker(ILockable &lockable)
+	: lockable_(lockable)
+	{
+		lockable_.lock();
+	}
+
+	~AutoLocker()
+	{
+		lockable_.unlock();
+	}
+};
+
+class PthreadConditional;
+
+class PthreadMutex : public ILockable {
+	pthread_mutex_t mutex_;
+
+	friend class PthreadConditional;
+
+public:
+	PthreadMutex()
+	: mutex_()
+	{
+		assert(!pthread_mutex_init(&mutex_, 0));
+	}
+
+	~PthreadMutex()
+	{
+		assert(!pthread_mutex_destroy(&mutex_));
+	}
+
+	virtual void
+	lock()
+	{
+		pthread_mutex_lock(&mutex_);
+	}
+
+	virtual void
+	unlock()
+	{
+		pthread_mutex_unlock(&mutex_);
+	}
+};
+
+class PthreadConditional {
+	pthread_cond_t cond_;
+
+public:
+	PthreadConditional()
+	: cond_()
+	{
+		assert(!pthread_cond_init(&cond_, 0));
+	}
+
+	~PthreadConditional()
+	{
+		assert(!pthread_cond_destroy(&cond_));
+	}
+
+	void
+	wait(PthreadMutex &mutex)
+	{
+		assert(!pthread_cond_wait(&cond_, &mutex.mutex_));
+	}
+
+	void
+	signal()
+	{
+		assert(!pthread_cond_signal(&cond_));
+//		assert(!pthread_cond_broadcast(&cond_));
+	}
+};
+
+class PthreadMonitor {
+	PthreadMutex mutex_;
+	PthreadConditional cond_;
+
+public:
+	virtual ~PthreadMonitor() {}
+
+	void
+	wait()
+	{
+		AutoLocker mutex(mutex_);
+		cond_.wait(mutex_);
+	}
+
+	void
+	notify()
+	{
+		AutoLocker mutex(mutex_);
+		cond_.signal();
+	}
+};
+
+template <class J>
+class PthreadPool;
+
+template <class J>
+class Worker : public PthreadMonitor, public IRunnable {
+	PthreadPool<J> &pool_;
+	J &job_;
+
+protected:
+	virtual void finish(J &job) = 0;
+
+public:
+	Worker(PthreadPool<J> &pool)
+	: pool_(pool)
+	{}
+
+	void job(const J &job) { job_ = job; }
+	J &job() const { return job_; }
+
+	virtual void
+	run()
+	{
+		while (true) {
+			wait();
+			finish(job_);
+			pool_.reportReadiness(*this);
+		}
+	}
+};
+
+class Job {
+};
+
+template <class J>
+class JobFactory {
+public:
+	virtual ~JobFactory() {}
+
+	virtual Job *next() = 0;
+};
+
+template <class J>
+class PthreadPool : public PthreadMonitor {
+	std::list<Worker<J> *> followers_;
+	PthreadMutex followersMutex_;
+	JobFactory<J> &jobFactory_;
+	std::vector<Pthread> threads_;
+
+public:
+	PthreadPool(JobFactory<J> &jobFactory, int poolSize)
+	: jobFactory_(jobFactory)
+	{}
+
+	void
+	reportReadiness(Worker<J> &worker)
+	{
+		AutoLocker locker(followersMutex_);
+		followers_.push_back(&worker);
+		notify();
+	}
+
+	void
+	run()
+	{
+		while (J *job = jobFactory_.next()) {
+		}
+	}
+};
+
+class Scheduler {
+public:
+	Job getNextJob();
+};
 
 class Tracer {
 	float fov_;
@@ -671,10 +912,10 @@ Tracer::render(Pixmap &pm, Scene &s)
 int
 main()
 {
-	Pixmap pm(1920, 1080);
+	Pixmap pm(1024, 768);
 	Scene s;
 	s.cam(Vector(-22.0f, 1.0f, 1.0f));
 	s.light(s.cam() + Vector(-17.0f, 4.0f, -11.0f));
-	Netbpm("x.ppm").save(Tracer(120.0f).render(pm, s));
+	Netbpm("x.ppm").save(Tracer(90.0f).render(pm, s));
 	return 0;
 }
