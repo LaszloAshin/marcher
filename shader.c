@@ -85,7 +85,7 @@ main()
 	SDL_GL_SET_ATTR(BLUE_SIZE, 8);
 	SDL_GL_SET_ATTR(DEPTH_SIZE, 16);
 	SDL_GL_SET_ATTR(DOUBLEBUFFER, 1);
-	assert(SDL_SetVideoMode(SCRW, SCRH, SCRBPP, SDL_OPENGL));
+	assert(SDL_SetVideoMode(SCRW, SCRH, SCRBPP, SDL_OPENGL /*| SDL_FULLSCREEN*/));
 /*	puts((const char *)glGetString(GL_EXTENSIONS));*/
 	DO_GL_PROCS(DEFINE_GL_PROC)
 	assert((shader_prog = glCreateProgramObjectARB()));
@@ -106,14 +106,15 @@ main()
 	i = 0; glGetInfoLogARB(shader_frag, sizeof(buf) - 1, &i, buf); buf[i] = 0; printf("frag error: \"%s\"\n", buf);
 	i = 0; glGetInfoLogARB(shader_prog, sizeof(buf) - 1, &i, buf); buf[i] = 0; printf("prog error: \"%s\"\n", buf);
 	glUseProgramObjectARB(shader_prog);
-	glBegin(GL_QUADS);
-	glVertex3f(-1.0f, 1.0f, 0.0f);
-	glVertex3f(1.0f, 1.0f, 0.0f);
-	glVertex3f(1.0f, -1.0f, 0.0f);
-	glVertex3f(-1.0f, -1.0f, 0.0f);
-	glEnd();
 	while (!SDL_GetKeyState(0)[SDLK_ESCAPE]) {
 		SDL_PumpEvents();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glBegin(GL_QUADS);
+		glVertex3f(-1.0f, 1.0f, 0.0f);
+		glVertex3f(1.0f, 1.0f, 0.0f);
+		glVertex3f(1.0f, -1.0f, 0.0f);
+		glVertex3f(-1.0f, -1.0f, 0.0f);
+		glEnd();
 		SDL_GL_SwapBuffers();
 	}
 	return 0;
