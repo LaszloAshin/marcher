@@ -3,8 +3,8 @@
 #include <GL/gl.h>
 #include <assert.h>
 
-#define SCRW (640)
-#define SCRH (480)
+#define SCRW (1024)
+#define SCRH (768)
 #define SCRBPP (32)
 
 #define SDL_GL_SET_ATTR(name, value) assert(!SDL_GL_SetAttribute(SDL_GL_ ## name, value))
@@ -75,6 +75,7 @@ main()
 	int i;
 	char buf[1024];
 	const GLcharARB *vertex_shader_code, *fragment_shader_code;
+	GLint loc;
 
 	assert((vertex_shader_code = loadShader("shader.vert")));
 	assert((fragment_shader_code = loadShader("shader.frag")));
@@ -106,8 +107,11 @@ main()
 	i = 0; glGetInfoLogARB(shader_frag, sizeof(buf) - 1, &i, buf); buf[i] = 0; printf("frag error: \"%s\"\n", buf);
 	i = 0; glGetInfoLogARB(shader_prog, sizeof(buf) - 1, &i, buf); buf[i] = 0; printf("prog error: \"%s\"\n", buf);
 	glUseProgramObjectARB(shader_prog);
+	loc = glGetUniformLocationARB(shader_prog, "time");
 	while (!SDL_GetKeyState(0)[SDLK_ESCAPE]) {
+		float time = (float)SDL_GetTicks() / 2000.0f;
 		SDL_PumpEvents();
+		glUniform1fARB(loc, time);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glBegin(GL_QUADS);
 		glVertex3f(-1.0f, 1.0f, 0.0f);
