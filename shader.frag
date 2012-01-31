@@ -40,10 +40,9 @@ plane(in vec4 col, in vec3 q, in float d)
 void
 scene()
 {
-		sphere(vec4(0.0, 1.0, 0.0, 0.0), C - vec3(2.0*cos(time), sin(time), 4.0+sin(time*0.87)), 1.0);
-		sphere(vec4(0.0, 0.0, 1.0, 0.0), C - vec3(-2.0*cos(time), 2.0*sin(time * 0.95), 3.0+sin(time*0.77)), 1.0);
-		plane(vec4(1.0, 0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), -1.0);
-//XXX:	plane(vec4(1.0, 1.0, 0.0, 0.0), vec3(0.0, -1.0, 0.0), 1.0);
+	sphere(vec4(0.0, 1.0, 0.0, 0.0), C - vec3(2.0*cos(time), sin(time), 4.0+sin(time*0.87)), 1.0);
+	sphere(vec4(0.0, 0.0, 1.0, 0.0), C - vec3(-2.0*cos(time), 2.0*sin(time * 0.95), 3.0+sin(time*0.77)), 1.0);
+	plane(vec4(1.0, 0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), -1.0);
 }
 
 void
