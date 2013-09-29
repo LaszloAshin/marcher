@@ -9,7 +9,6 @@
 #include <iomanip>
 #include <cmath>
 #include <cassert>
-#include <pthread.h>
 #include <list>
 
 // http://rrrola.wz.cz/inv_sqrt.html
