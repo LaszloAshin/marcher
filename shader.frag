@@ -1,82 +1,53 @@
 varying vec4 pos;
 uniform float time;
 const float eps = 1e-6;
-vec3 L1;
-vec4 CO;
-float t;
-vec3 C, V, N;
+vec3 V = vec3(pos.x, pos.y, 1.0);
+vec3 C = vec3(0.0, 0.0, time);
 
-void
-sphere(in vec4 col, in vec3 d, in float r)
-{
-	float D = pow(dot(d, V), 2) - dot(V, V) * (dot(d, d) - r * r);
-	if (D > eps) {
-		D = sqrt(D);
-		float t1 = (-dot(d, V) + D) / dot(V, V);
-		float t2 = (-dot(d, V) - D) / dot(V, V);
-		if (t2 < eps) t2 = t1;
-		if (t2 > eps && t2 < t) {
-			t = t2;
-			N = d + V * t2;
-			CO = col;
-		}
-	}
+float rand(float x, float y) {
+    return fract(sin(12.9898 * x + 78.233 * y) * 43758.5453);
 }
 
-void
-plane(in vec4 col, in vec3 q, in float d)
-{
-	float a = dot(V, q);
-	if (abs(a) > eps) {
-		float t2 = (d - dot(C, q)) / a;
-		if (t2 > eps && t2 < t) {
-			t = t2;
-			N = q;
-			CO = col;
-		}
-	}
+float noise(vec2 p) {
+	vec2 i = floor(p);
+	p -= i;
+	p = smoothstep(0.0, 1.0, p);
+	return mix(
+		mix(rand(i.x, i.y), rand(i.x + 1.0, i.y), p.x),
+		mix(rand(i.x, i.y + 1.0), rand(i.x + 1.0, i.y + 1.0), p.x),
+		p.y
+	);
 }
 
-void
-scene()
-{
-	sphere(vec4(0.0, 1.0, 0.0, 0.0), C - vec3(2.0*cos(time), sin(time), 4.0+sin(time*0.87)), 1.0);
-	sphere(vec4(0.0, 0.0, 1.0, 0.0), C - vec3(-2.0*cos(time), 2.0*sin(time * 0.95), 3.0+sin(time*0.77)), 1.0);
-	plane(vec4(1.0, 0.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), -1.0);
+float perlin(vec2 p) {
+	float z = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 1; ++i) {
+		z += a * noise(p);
+		a *= 0.5;
+		p *= 2.0;
+	}
+	return z;
 }
 
 void
 main()
 {
-	L1 = vec3(50.0 * sin(0.1 * time), 10.0, 50.0 * cos(0.1 * time));
-	C = vec3(0.0, 0.0, 0.0);
-	V = vec3(pos.x, pos.y, 1.0);
-	vec4 a = vec4(0.0, 0.0, 0.0, 1.0);
-	for (int i = 0; i < 4; ++i) {
-		t = 1000.0;
-		scene();
-		if (t > 999.0) {
-			break;
-		}
-		N = normalize(N);
+	float t = 1.0;
+	float ody = 0.0;
+	float ot = t;
+	while (t < 5.0) {
 		vec3 p = C + V * t;
-		vec3 L = normalize(L1 - p);
-		vec3 Cn = normalize(C - p);
-		vec3 R = 2.0 * (N * dot(Cn, N)) - Cn;
-		vec3 m = vec3(0.3, 0.6, 0.1);
-		vec3 k = vec3(max(0.0, dot(L, N)), pow(max(0.0, dot(L, R)), 32), 1.0);
-		vec4 col = CO;
-		C = p + L * 1e-3;
-		V = L;
-		t = 1000.0;
-		scene();
-		if (t < 999.0) {
-			// in shadow
-			k.x = k.y = 0.0;
+		float f = 2.0 * perlin(p.xz) - 1.0;
+		float dy = f - p.y;
+		if (dy > 0.0) {
+			t = (ot * dy - t * ody) / (dy - ody);
+			gl_FragColor = vec4(1.0 - (t - 1.0) / 5.0, 0.0, 0.0, 1.0);
+			return;
 		}
-		a += col * dot(m, k) * (1.0 / pow(2.0, i));
-		C = p + R * 1e-3;
-		V = R;
+		ody = dy;
+		ot = t;
+		t += 0.05 * t;
 	}
-	gl_FragColor = clamp(a, vec4(0.0, 0.0, 0.0, 1.0), vec4(1.0, 1.0, 1.0, 1.0));
+	gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
 }
