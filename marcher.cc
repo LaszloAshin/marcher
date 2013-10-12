@@ -640,8 +640,8 @@ const
 Pixmap &
 Tracer::render(Pixmap &pm, Scene &s)
 {
-//	const float EDGE_LIMIT = 0.01f;
-	const float EDGE_LIMIT = 10.0f;
+	const float EDGE_LIMIT = 0.01f;
+//	const float EDGE_LIMIT = 10.0f;
 	const int OVERSAMPLE = 8;
 
 	std::vector<Pixel> pl(pm.w() + 1);
@@ -673,7 +673,7 @@ Tracer::render(Pixmap &pm, Scene &s)
 int
 main()
 {
-	Pixmap pm(320, 240);
+	Pixmap pm(1280, 800);
 	Scene s;
 	s.cam(Vector(-22.0f, 1.0f, 1.0f));
 	s.light(s.cam() + Vector(-17.0f, 4.0f, -11.0f));
